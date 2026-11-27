@@ -1,3 +1,45 @@
+import os
+import json
+import re
+import time
+from datetime import datetime
+import requests
+from google import genai
+
+# 환경 변수 로드 (GitHub Secrets에서 주입)
+GOV24_API_KEY = os.environ["GOV24_API_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+
+POSTED_IDS_PATH = "data/posted_ids.json"
+POSTS_DIR = "content/posts"
+MAX_POSTS_PER_RUN = 5   # 1회 실행당 발행할 글 개수
+PER_PAGE = 100          # 한 번에 조회할 공고 수
+MAX_PAGES = 200         # 무한 루프 방지용 최대 페이지 제한
+
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+def load_posted_ids():
+    if not os.path.exists(POSTED_IDS_PATH):
+        return []
+    with open(POSTED_IDS_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_posted_ids(ids):
+    os.makedirs(os.path.dirname(POSTED_IDS_PATH), exist_ok=True)
+    with open(POSTED_IDS_PATH, "w", encoding="utf-8") as f:
+        json.dump(ids, f, ensure_ascii=False, indent=2)
+
+def fetch_subsidies(page=1, per_page=PER_PAGE):
+    url = "https://api.odcloud.kr/api/gov24/v3/serviceList"
+    params = {
+        "page": page,
+        "perPage": per_page,
+        "serviceKey": GOV24_API_KEY,
+    }
+    res = requests.get(url, params=params, timeout=15)
+    res.raise_for_status()
+    return res.json().get("data", [])
+
 def generate_markdown_post(item):
     today_str = datetime.now().strftime("%Y-%m-%d")
     year_str = datetime.now().strftime("%Y")
@@ -8,6 +50,8 @@ def generate_markdown_post(item):
 [원본 데이터]
 - 서비스명: {item.get('서비스명')}
 - 소관기관: {item.get('소관기관명')}
+- 등록일시: {item.get('등록일시')}
+- 수정일시: {item.get('수정일시')}
 - 지원목적: {item.get('서비스목적요약')}
 - 지원대상: {item.get('지원대상')}
 - 선정기준: {item.get('선정기준')}
@@ -25,20 +69,25 @@ categories: ["정부지원금"]
 tags: ["보조금24", "{item.get('소관기관명')}", "지원금"]
 draft: false
 ---
+
 2. 문체 및 형식 금지 사항 (매우 중요):
-- 본문, 소제목, 링크 어디에도 이모지(예: 💰, ❌, 📝, 🔗, 👉 등)와 특수 기호 아이콘을 절대 사용하지 마세요.
-- "안녕하세요", "오늘은 ~에 대해 알아보겠습니다", "많은 도움이 되셨길 바랍니다" 같은 뻔한 블로그 인사말과 AI 특유의 과장된 표현을 쓰지 마세요.
-- 신문사 정책 해설 기사나 공공 안내문처럼 차분하고 명확한 존댓말(~입니다, ~할 수 있습니다)을 사용하세요.
-- 링크 뒤에 '{{: .btn ...}}' 같은 확장 속성 문법을 절대 붙이지 마세요. 반드시 표준 마크다운 링크 '[텍스트](URL)'만 사용하세요.
+- 본문, 소제목, 링크 어디에도 이모지(💰, ❌, 📝, 🔗, 👉 등)와 특수 기호 아이콘을 절대 사용하지 마세요.
+- "안녕하세요", "오늘은 ~에 대해 알아보겠습니다", "주목하세요", "놓치지 마세요", "많은 도움이 되셨길 바랍니다" 같은 뻔한 AI·블로그 상투어를 절대 쓰지 마세요.
+- 링크 뒤에 '{{: .btn ...}}' 같은 확장 속성 문법을 절대 붙이지 마세요. 표준 마크다운 링크 '[텍스트](URL)'만 사용하세요.
 
-3. 본문 구성 (소제목은 ## 사용):
-- 도입부 (소제목 없이 바로 시작): 이 제도가 어떤 상황에서 도움이 되는지 핵심 내용을 2~3문장으로 자연스럽게 요약.
-- ## 한눈에 보는 핵심 정보: 지원대상, 지원내용, 신청기한, 신청방법, 소관기관을 깔끔한 Markdown 표로 정리.
-- ## 지원 대상 및 자격 요건: 행정 용어를 일반 독자가 이해하기 쉬운 일상어로 풀어 설명.
-- ## 신청 방법 및 유의사항: 실제 신청 절차를 순서대로 정리하고, 놓치기 쉬운 주의사항을 덧붙임.
-- ## 공식 상세 안내: 원본 데이터의 상세URL을 표준 마크다운 링크(`[보조금24 공식 페이지에서 상세 내용 확인하기](URL)`)로 제공.
+3. 본문 구성:
+- **서두 도입부 (소제목 없이 바로 시작, 3~4문장):**
+  * 독자의 시선을 끌 수 있도록 실제 생활에서 이 지원금이 절실해지는 구체적인 상황이나 고민을 먼저 짚어주세요. (예: "월세 부담이 커지는 시기인데...", "아이 학원비나 생활비가 빠듯할 때...")
+  * 이 제도가 **언제, 어떤 상황에 처한 사람에게 가장 필요한지**를 지인이 핵심만 알려주듯 담백하고 자연스러운 구어체 섞인 존댓말(~거든요, ~해 볼 만합니다, ~챙겨보셔야 합니다 등)로 풀어쓰세요.
+  * 원본 데이터(지원목적, 수정일시 등)에 최근 신설·개편된 시점이 명확히 드러나면 자연스럽게 언급하되, **데이터에 없는 최초 도입 연도를 절대 추측해서 지어내지 마세요.** 시점 정보가 없다면 "{year_str}년 현재 기준"으로 지금 신청해야 하는 이유에 집중하세요.
+- **서두 바로 아래 핵심 한 줄 요약 (인용구 `>` 사용):**
+  * `> **이런 분께 필요합니다:** (대상과 핵심 혜택을 한 문장으로 명확하게 정리)`
+- `## 한눈에 보는 핵심 정보`: 지원대상, 지원내용, 신청기한, 신청방법, 소관기관을 깔끔한 Markdown 표로 정리.
+- `## 지원 대상 및 자격 요건`: 행정 용어를 일반 독자가 이해하기 쉬운 일상어로 풀어 설명.
+- `## 신청 방법 및 유의사항`: 실제 신청 절차를 순서대로 정리하고, 놓치기 쉬운 주의사항을 덧붙임.
+- `## 공식 상세 안내`: 원본 데이터의 상세URL을 표준 마크다운 링크(`[보조금24 공식 페이지에서 상세 내용 확인하기](URL)`)로 제공.
 
-4. 원본 데이터에 없는 금액, 날짜, 조건을 절대 지어내지 마세요.
+4. 원본 데이터에 없는 금액, 날짜, 조건, 신설 연도를 절대 지어내지 마세요.
 """
     for attempt in range(3):
         try:
@@ -49,12 +98,3 @@ draft: false
             text = response.text.strip()
             # 혹시 모를 코드블록 감싸기 및 Kramdown 링크 속성({: ...}) 자동 제거
             text = re.sub(r"^```(?:markdown)?\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-            text = re.sub(r"\{:[^}]*\}", "", text)
-            return text.strip()
-        except Exception as e:
-            if "503" in str(e) and attempt < 2:
-                print(f"서버 혼잡(503) 감지, 15초 후 재시도합니다... ({attempt + 1}/3)")
-                time.sleep(15)
-            else:
-                raise e
