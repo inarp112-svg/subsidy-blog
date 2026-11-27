@@ -16,12 +16,16 @@
 <body>
   <h1>{{ .Site.Title }}</h1>
   <ul>
-    {{ range .Site.RegularPages }}
+    {{ range where .Site.RegularPages "Section" "posts" }}
       <li>
         <a href="{{ .RelPermalink }}">{{ .Title }}</a>
         <span class="date">{{ .Date.Format "2006-01-02" }}</span>
       </li>
     {{ end }}
   </ul>
+  <footer style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; font-size: 0.9rem; color: #666;">
+  <a href="/about/" style="color: #666; margin-right: 15px;">소개 및 문의</a>
+  <a href="/privacy/" style="color: #666;">개인정보처리방침</a>
+</footer>
 </body>
 </html>
