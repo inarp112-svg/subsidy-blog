@@ -85,4 +85,77 @@ draft: false
 - ## 한눈에 보는 핵심 정보: 지원대상, 지원내용, 신청기한, 신청방법, 소관기관을 깔끔한 Markdown 표로 정리.
 - ## 지원 대상 및 자격 요건: 행정 용어를 일반 독자가 이해하기 쉬운 일상어로 풀어 설명.
 - ## 신청 방법 및 유의사항: 실제 신청 절차를 순서대로 정리하고, 놓치기 쉬운 주의사항을 덧붙임.
-- ## 공식 상세 안내: 원본 데이터의 상세URL을 표준 마크다운 링크([보조금24 공식 페이지에서 상세 내용 확인하기
+- ## 공식 상세 안내: 원본 데이터의 상세URL을 표준 마크다운 링크([보조금24 공식 페이지에서 상세 내용 확인하기](URL))로 제공.
+
+4. 원본 데이터에 없는 금액, 날짜, 조건, 신설 연도를 절대 지어내지 마세요.
+"""
+    bt = "`" * 3
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+            text = response.text.strip()
+            text = re.sub(rf"^{bt}(?:markdown)?\s*", "", text)
+            text = re.sub(rf"\s*{bt}$", "", text)
+            text = re.sub(r"\{:[^}]*\}", "", text)
+            return text.strip()
+        except Exception as e:
+            if "503" in str(e) and attempt < 2:
+                print(f"서버 혼잡(503) 감지, 15초 후 재시도합니다... ({attempt + 1}/3)")
+                time.sleep(15)
+            else:
+                raise e
+
+def sanitize_filename(text):
+    return re.sub(r"[^가-힣a-zA-Z0-9_-]", "-", text)[:50]
+
+def main():
+    posted_ids = load_posted_ids()
+    posted_set = set(posted_ids)
+    os.makedirs(POSTS_DIR, exist_ok=True)
+
+    count = 0
+    page = 1
+
+    while count < MAX_POSTS_PER_RUN and page <= MAX_PAGES:
+        print(f"보조금24 API {page}페이지 조회 중...")
+        items = fetch_subsidies(page=page, per_page=PER_PAGE)
+
+        if not items:
+            print("조회할 수 있는 모든 공고를 확인했습니다.")
+            break
+
+        for item in items:
+            if count >= MAX_POSTS_PER_RUN:
+                break
+
+            service_id = item.get("서비스ID")
+            if not service_id or service_id in posted_set:
+                continue
+
+            if not item.get("지원내용") or len(item.get("지원내용", "")) < 15:
+                continue
+
+            md_content = generate_markdown_post(item)
+            date_prefix = datetime.now().strftime("%Y-%m-%d")
+            slug = sanitize_filename(item.get("서비스명", service_id))
+            filename = f"{date_prefix}-{slug}-{service_id}.md"
+
+            with open(os.path.join(POSTS_DIR, filename), "w", encoding="utf-8") as f:
+                f.write(md_content)
+
+            posted_ids.append(service_id)
+            posted_set.add(service_id)
+            save_posted_ids(posted_ids)
+
+            count += 1
+            print(f"발행 완료 ({count}/{MAX_POSTS_PER_RUN}): {filename}")
+
+        page += 1
+
+    print(f"작업 종료: 총 {count}개의 새 글을 발행했습니다.")
+
+if __name__ == "__main__":
+    main()
