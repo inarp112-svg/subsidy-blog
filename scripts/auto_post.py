@@ -12,7 +12,9 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
 POSTED_IDS_PATH = "data/posted_ids.json"
 POSTS_DIR = "content/posts"
-MAX_POSTS_PER_RUN = 5
+MAX_POSTS_PER_RUN = 5   # 1회 실행당 발행할 글 개수
+PER_PAGE = 100          # 한 번에 조회할 공고 수
+MAX_PAGES = 200         # 무한 루프 방지용 최대 페이지 제한
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -27,7 +29,7 @@ def save_posted_ids(ids):
     with open(POSTED_IDS_PATH, "w", encoding="utf-8") as f:
         json.dump(ids, f, ensure_ascii=False, indent=2)
 
-def fetch_subsidies(page=1, per_page=30):
+def fetch_subsidies(page=1, per_page=PER_PAGE):
     url = "https://api.odcloud.kr/api/gov24/v3/serviceList"
     params = {
         "page": page,
@@ -66,11 +68,11 @@ tags: ["보조금24", "{item.get('소관기관명')}", "지원금"]
 draft: false
 ---
 2. 본문 구성:
-   - 도입부: 누가 어떤 혜택을 받을 수 있는지 2~3문장으로 핵심 요약.
-   - 핵심 요약 표: 지원대상, 지원내용, 신청기한, 신청방법을 Markdown 표로 정리.
-   - 자격 요건 체크리스트: 어려운 행정 용어를 일상어로 풀어 불릿 리스트로 작성.
-   - 신청 방법 및 주의사항: 단계별 번호 리스트.
-   - 공식 신청 바로가기: 원본 데이터의 상세URL을 링크 버튼 형태로 제공.
+- 도입부: 누가 어떤 혜택을 받을 수 있는지 2~3문장으로 핵심 요약.
+- 핵심 요약 표: 지원대상, 지원내용, 신청기한, 신청방법을 Markdown 표로 정리.
+- 자격 요건 체크리스트: 어려운 행정 용어를 일상어로 풀어 불릿 리스트로 작성.
+- 신청 방법 및 주의사항: 단계별 번호 리스트.
+- 공식 신청 바로가기: 원본 데이터의 상세URL을 링크 버튼 형태로 제공.
 3. 원본 데이터에 없는 금액이나 날짜를 절대 지어내지 마세요.
 """
     for attempt in range(3):
@@ -92,35 +94,51 @@ def sanitize_filename(text):
 
 def main():
     posted_ids = load_posted_ids()
-    items = fetch_subsidies()
+    posted_set = set(posted_ids)
     os.makedirs(POSTS_DIR, exist_ok=True)
 
     count = 0
-    for item in items:
-        if count >= MAX_POSTS_PER_RUN:
+    page = 1
+
+    while count < MAX_POSTS_PER_RUN and page <= MAX_PAGES:
+        print(f"보조금24 API {page}페이지 조회 중...")
+        items = fetch_subsidies(page=page, per_page=PER_PAGE)
+
+        # 더 이상 가져올 공고가 없으면 종료
+        if not items:
+            print("조회할 수 있는 모든 공고를 확인했습니다.")
             break
 
-        service_id = item.get("서비스ID")
-        if not service_id or service_id in posted_ids:
-            continue
+        for item in items:
+            if count >= MAX_POSTS_PER_RUN:
+                break
 
-        # 지원내용이 너무 부실한 공고는 제외
-        if not item.get("지원내용") or len(item.get("지원내용", "")) < 15:
-            continue
+            service_id = item.get("서비스ID")
+            if not service_id or service_id in posted_set:
+                continue
 
-        md_content = generate_markdown_post(item)
-        date_prefix = datetime.now().strftime("%Y-%m-%d")
-        slug = sanitize_filename(item.get("서비스명", service_id))
-        filename = f"{date_prefix}-{slug}-{service_id}.md"
+            # 지원내용이 너무 부실한 공고는 제외
+            if not item.get("지원내용") or len(item.get("지원내용", "")) < 15:
+                continue
 
-        with open(os.path.join(POSTS_DIR, filename), "w", encoding="utf-8") as f:
-            f.write(md_content)
+            md_content = generate_markdown_post(item)
+            date_prefix = datetime.now().strftime("%Y-%m-%d")
+            slug = sanitize_filename(item.get("서비스명", service_id))
+            filename = f"{date_prefix}-{slug}-{service_id}.md"
 
-        posted_ids.append(service_id)
-        count += 1
-        print(f"발행 완료: {filename}")
+            with open(os.path.join(POSTS_DIR, filename), "w", encoding="utf-8") as f:
+                f.write(md_content)
 
-    save_posted_ids(posted_ids)
+            posted_ids.append(service_id)
+            posted_set.add(service_id)
+            save_posted_ids(posted_ids)  # 글 1개 작성 직후 즉시 저장
+
+            count += 1
+            print(f"발행 완료 ({count}/{MAX_POSTS_PER_RUN}): {filename}")
+
+        page += 1
+
+    print(f"작업 종료: 총 {count}개의 새 글을 발행했습니다.")
 
 if __name__ == "__main__":
     main()
