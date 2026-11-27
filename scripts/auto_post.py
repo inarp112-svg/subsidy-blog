@@ -12,7 +12,7 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
 POSTED_IDS_PATH = "data/posted_ids.json"
 POSTS_DIR = "content/posts"
-MAX_POSTS_PER_RUN = 3
+MAX_POSTS_PER_RUN = 5
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
