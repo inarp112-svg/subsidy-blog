@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ .Site.Title }}</title>
+  <style>
+    body { max-width: 760px; margin: 40px auto; padding: 0 20px; font-family: -apple-system, sans-serif; line-height: 1.7; color: #222; }
+    h1 { border-bottom: 2px solid #222; padding-bottom: 12px; }
+    ul { list-style: none; padding: 0; }
+    li { margin: 18px 0; padding-bottom: 14px; border-bottom: 1px solid #eee; }
+    a { text-decoration: none; color: #0056b3; font-size: 1.15rem; font-weight: 600; }
+    .date { display: block; font-size: 0.85rem; color: #666; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>{{ .Site.Title }}</h1>
+  <ul>
+    {{ range .Site.RegularPages }}
+      <li>
+        <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+        <span class="date">{{ .Date.Format "2006-01-02" }}</span>
+      </li>
+    {{ end }}
+  </ul>
+</body>
+</html>
