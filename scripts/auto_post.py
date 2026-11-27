@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 from datetime import datetime
 import requests
 from google import genai
@@ -72,11 +73,19 @@ draft: false
    - 공식 신청 바로가기: 원본 데이터의 상세URL을 링크 버튼 형태로 제공.
 3. 원본 데이터에 없는 금액이나 날짜를 절대 지어내지 마세요.
 """
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-    )
-    return response.text.strip()
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+            )
+            return response.text.strip()
+        except Exception as e:
+            if "503" in str(e) and attempt < 2:
+                print(f"서버 혼잡(503) 감지, 15초 후 재시도합니다... ({attempt + 1}/3)")
+                time.sleep(15)
+            else:
+                raise e
 
 def sanitize_filename(text):
     return re.sub(r"[^가-힣a-zA-Z0-9_-]", "-", text)[:50]
