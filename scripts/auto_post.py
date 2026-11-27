@@ -73,7 +73,7 @@ draft: false
 3. 원본 데이터에 없는 금액이나 날짜를 절대 지어내지 마세요.
 """
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
     return response.text.strip()
